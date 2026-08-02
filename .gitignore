@@ -1,0 +1,33 @@
+# Environment
+.env
+.env.local
+.env.*.local
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Dependencies (when applicable)
+node_modules/
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# Build artifacts (when applicable)
+dist/
+build/
+*.egg-info/
+
+# Runtime
+.cache/
+*.log
+
+# Sensitive data
+.secrets/
+*.key
+*.pem
