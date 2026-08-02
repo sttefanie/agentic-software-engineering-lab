@@ -4,11 +4,11 @@ Status: WAITING_HUMAN_INPUT
 
 ## Problema
 
-Como cliente de um banco digital, o usuário deseja consultar as transações recentes de sua conta para acompanhar movimentações financeiras. A solicitação inicial é vaga (não define escopo temporal, paginação, autenticação ou quais contas são consultáveis), o que impede a definição completa do contrato da API.
+Como cliente de um banco digital, o usuário deseja consultar as transações recentes de sua conta para acompanhar movimentações financeiras. A solicitação inicial é vaga (não define escopo [...]
 
 ## Objetivo de negócio
 
-Permitir que clientes verifiquem, de forma segura e eficiente, as movimentações recentes de suas contas para acompanhar saldos, detectar transações inesperadas e manter controle financeiro pessoal.
+Permitir que clientes verifiquem, de forma segura e eficiente, as movimentações recentes de suas contas para acompanhar saldos, detectar transações inesperadas e manter controle financeiro pes[...]
 
 ## Atores
 
@@ -19,6 +19,26 @@ Permitir que clientes verifiquem, de forma segura e eficiente, as movimentaçõe
 - Observability/monitoring (por exemplo, registro de eventos de consulta)
 
 ## Intenção semântica
+
+request_id: SPEC-001
+intent: "Recuperar lista paginada de atividades financeiras recentes associadas à(s) conta(s) do cliente para visualização e auditoria pessoal"
+operation: "read"
+domain: "Account"
+capabilities:
+  API: REQUIRED
+  Persistence: REQUIRED
+  Authentication: REQUIRED
+  Authorization: REQUIRED
+  Validation: REQUIRED
+  Observability: REQUIRED
+  Security: REQUIRED
+confidence: 0.85
+ambiguities:
+  - "Mecanismo de autenticação (ex.: JWT, OAuth2, session) não definido"
+  - "Estratégia de paginação (cursor vs offset) e tamanho padrão não definidos"
+  - "Intervalo temporal padrão quando nenhum filtro é informado (ex.: últimos 30 dias) não definido"
+  - "Campos do recurso Transaction a expor na API não definidos"
+  - "Comportamento para contas sem transações (200 lista vazia vs 204) não definido"
 
 Intenção: Recuperar uma lista paginada de atividades financeiras recentes associadas à conta(s) do cliente para fins de visualização e auditoria pessoal.
 
@@ -447,4 +467,3 @@ Resultado experimental inventado: NO
 1. Decidir mecanimos essenciais (Q-001 a Q-004) para remover bloqueios técnicos.
 2. Com as decisões, completar a SPEC com contratos de API (parâmetros, exemplos, schemas) e critérios de aceite.
 3. Planejar tasks para implementação respeitando a Arquitetura Hexagonal.
-
