@@ -1,0 +1,11 @@
+# Contrato conceitual; não gerar manifesto real nesta etapa.
+run_id:
+condition:
+
+files:
+  - path:
+    reason:
+    knowledge_type:
+    authority:
+    status:
+    relevance:

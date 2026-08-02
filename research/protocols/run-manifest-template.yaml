@@ -1,0 +1,21 @@
+# Contrato conceitual; não preencher nesta etapa.
+run_id:
+condition:
+base_commit:
+timestamp:
+
+model:
+model_version:
+model_configuration:
+
+started_at:
+finished_at:
+
+task:
+task_prompt_version:
+spec: SPEC-001
+tools:
+tooling:
+
+human_interventions: []
+result:
