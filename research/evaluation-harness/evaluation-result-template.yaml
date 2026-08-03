@@ -1,0 +1,17 @@
+# Template conceitual. Não preencher resultados nesta etapa.
+evaluation_run_id:
+implementation_run_id:
+condition:
+base_commit: a27dfc4fa454ff030ab59da0c49b0bf9cf5c11c0
+evaluation_version: 1.0.0
+
+checks:
+  - id:
+    result: NOT_EXECUTED
+    evidence:
+
+summary:
+  passed:
+  failed:
+  not_applicable:
+  not_evaluable:
