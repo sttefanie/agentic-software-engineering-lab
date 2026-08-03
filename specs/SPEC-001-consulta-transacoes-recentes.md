@@ -1,6 +1,6 @@
 # SPEC-001 — Consulta de transações recentes
 
-Status: WAITING_HUMAN_INPUT
+Status: APPROVED
 
 ## Problema
 
@@ -33,12 +33,7 @@ capabilities:
   Observability: REQUIRED
   Security: REQUIRED
 confidence: 0.85
-ambiguities:
-  - "Mecanismo de autenticação (ex.: JWT, OAuth2, session) não definido"
-  - "Estratégia de paginação (cursor vs offset) e tamanho padrão não definidos"
-  - "Intervalo temporal padrão quando nenhum filtro é informado (ex.: últimos 30 dias) não definido"
-  - "Campos do recurso Transaction a expor na API não definidos"
-  - "Comportamento para contas sem transações (200 lista vazia vs 204) não definido"
+ambiguities: []
 
 Intenção: Recuperar uma lista paginada de atividades financeiras recentes associadas à conta(s) do cliente para fins de visualização e auditoria pessoal.
 
@@ -60,7 +55,7 @@ Account (conta)
 
 - API: REQUIRED — a funcionalidade expõe um endpoint de leitura.
 - Persistence: REQUIRED — leitura de registros de transação no banco.
-- Authentication: REQUIRED — é necessário identificar o usuário (mecanismo não definido).
+- Authentication: REQUIRED — identificar o usuário com Bearer token opaco no laboratório.
 - Authorization: REQUIRED — garantir que o usuário só acesse suas próprias contas/transações.
 - Validation: REQUIRED — validar parâmetros de consulta (datas, paginação, filtros).
 - Observability: REQUIRED — registrar métricas de sucesso/erro/latência e contagem de resultados (sem dados sensíveis).
@@ -72,57 +67,64 @@ Justificativas sucintas estão mantidas nos itens acima.
 ## Requisitos funcionais confirmados
 
 - RF-001: O sistema deve permitir que um cliente consulte transações recentes associadas à(s) sua(s) conta(s).
-
-(Nota: o escopo temporal, paginação, filtros e formato de resposta NÃO estão definidos e são exigências em aberto.)
+- RF-002: A autenticação deve usar Bearer token opaco no laboratório; a identidade autenticada não concede, por si só, acesso à conta.
+- RF-003: O sistema deve verificar explicitamente o ownership da conta pela relação `Account → Customer` autenticado antes de consultar dados.
+- RF-004: A consulta deve usar paginação `offset/limit`, com `offset` padrão `0`, `limit` padrão `20` e `limit` máximo `100`.
+- RF-005: Sem filtros temporais, a consulta deve considerar o intervalo de `now UTC - 30 dias` até `now UTC`.
+- RF-006: A resposta deve expor somente `id`, `timestamp`, `amount`, `currency`, `type` e `description` para cada Transaction.
+- RF-007: Para conta válida e autorizada sem transações no intervalo, o sistema deve retornar `200 OK` com coleção vazia.
 
 ## Requisitos não funcionais confirmados
 
 - RNF-001: A operação deve ser tratada como leitura (sem efeito sobre estado) e otimizada para baixa latência.
 - RNF-002: Nenhuma informação sensível (por exemplo, PAN completo) deve ser logada em texto claro.
+- RNF-003: Datas devem ser interpretadas em UTC. Datas futuras e intervalos em que `from > to` são inválidos.
+- RNF-004: Valores negativos de `offset`, `limit` inválido ou `limit` superior a `100` são inválidos.
+- RNF-005: Parâmetros inválidos devem retornar `400 Bad Request` com estrutura de erro padronizada, sem adotar `422` como contrato público.
 
 ## Critérios de aceite confirmados
 
-### Confirmados
-- CA-001: Um cliente autenticado consegue receber uma lista de transações (estrutura e campos exatos pendentes).
-
-### Pendentes
-- CA-002: Definir paginação (cursor vs. offset) e tamanho padrão da página.
-- CA-003: Definir intervalo temporal padrão retornado (por ex., 30 dias) ou parâmetro obrigatório.
-- CA-004: Definir comportamento quando não houver transações (resposta vazia vs. 204).
+- CA-001: DADO um cliente autenticado e autorizado, QUANDO consultar uma conta própria, ENTÃO recebe `200 OK` com transações contendo exclusivamente os campos públicos aprovados.
+- CA-002: DADO que `offset` e `limit` não são enviados, QUANDO a consulta é realizada, ENTÃO são usados `offset=0` e `limit=20`; `limit` não pode exceder `100`.
+- CA-003: DADO que filtros temporais não são enviados, QUANDO a consulta é realizada, ENTÃO o intervalo corresponde aos últimos 30 dias em UTC.
+- CA-004: DADA uma conta válida e autorizada sem transações no intervalo, QUANDO a consulta é realizada, ENTÃO a resposta é `200 OK` com coleção vazia.
+- CA-005: DADO um token ausente ou inválido, QUANDO a consulta é realizada, ENTÃO a requisição é rejeitada sem acesso aos dados da conta.
+- CA-006: DADO um cliente sem ownership da conta, ou uma conta inexistente, QUANDO a consulta é realizada, ENTÃO a resposta externa é `404 Not Found` e não revela a existência da conta.
+- CA-007: DADO um parâmetro inválido, data futura, `from > to`, `offset` negativo ou `limit` fora do intervalo permitido, QUANDO a consulta é realizada, ENTÃO a resposta é `400 Bad Request` com erro padronizado.
 
 ## Cenário feliz (Happy Path)
 
 1. Cliente autenticado faz requisição GET ao endpoint de transações recentes para uma conta que lhe pertence.
-2. Sistema valida autenticação e autorização (conta pertence ao cliente).
-3. Sistema valida parâmetros de consulta (datas, paginação, filtros).
+2. Sistema identifica o cliente pelo Bearer token opaco e verifica explicitamente o ownership da conta.
+3. Sistema valida parâmetros de consulta: UTC, intervalo temporal, `offset` e `limit`.
 4. Use case consulta o repositório de transações via Output Port.
 5. Adapter de persistência retorna transações ordenadas por data decrescente.
-6. Sistema devolve resposta paginada com metadados (p.ex., total estimado, cursor/página).
+6. Sistema devolve resposta `200 OK`, paginada por `offset/limit`, com os campos públicos aprovados.
 
 ## Cenários de falha
 
-- Usuário não autenticado: requisição rejeitada (detalhes do mecanismo de autenticação OPEN_QUESTION).
-- Usuário autenticado mas não autorizado para a conta: retorno de erro de autorização.
-- Conta inexistente: retornar indicação de recurso não encontrado ou erro de autorização (policy-dependent).
-- Parâmetros inválidos (ex.: formato de data incorreto): validação e erro apropriado.
+- Usuário não autenticado: requisição rejeitada sem acesso aos dados.
+- Usuário autenticado mas não autorizado para a conta: `404 Not Found`, externamente indistinguível de conta inexistente.
+- Conta inexistente: `404 Not Found`, sem revelar a existência do recurso.
+- Parâmetros inválidos, datas futuras, `from > to`, `offset` negativo ou `limit` inválido: `400 Bad Request` com estrutura de erro padronizada.
 - Falha de persistência: retorno de erro 5xx com observabilidade para investigação.
-- Resultado vazio: resposta válida com lista vazia (ou 204 — decisão pendente).
+- Resultado vazio: `200 OK` com coleção vazia.
 
 ## Casos de borda
 
-- Conta sem transações: RECOMMENDED_FOR_DISCUSSION — decidir resposta padrão.
-- Grande volume de transações: RECOMMENDED_FOR_DISCUSSION — exigir paginação e limites.
-- Paginação e ordenação: REQUIRED to decide paging strategy (OPEN_QUESTION).
-- Intervalo temporal/Timezone: OPEN_QUESTION — definir padrão (UTC?) e comportamento.
+- Conta sem transações: `200 OK` com coleção vazia.
+- Grande volume de transações: paginação `offset/limit`, com `limit` máximo `100`.
+- Paginação e ordenação: `offset/limit`; ordenação por data decrescente.
+- Intervalo temporal/Timezone: últimos 30 dias por padrão, em UTC.
 - Transações com mesmo timestamp: OUT_OF_SCOPE_CANDIDATE — tratar ordenação secundária é detalhe de implementação.
-- Parâmetros extremos (datas no futuro): OPEN_QUESTION — validar e rejeitar/excluir.
+- Parâmetros extremos (datas no futuro): inválidos; retornar `400 Bad Request`.
 
 Classificações acima indicam se devem ser tratadas antes da implementação.
 
 ## Segurança
 
-- AUTENTICAÇÃO: OPEN_QUESTION — mecanismo de autenticação não definido no projeto. Esta SPEC NÃO assume JWT, OAuth2 ou outro.
-- AUTORIZAÇÃO: REQUIRED — garantir isolamento de dados por cliente; evitar enumeração de contas (por ex., não revelar existência de conta por mensagem de erro distinta).
+- AUTENTICAÇÃO: Bearer token opaco para o laboratório, sem JWT ou OAuth2.
+- AUTORIZAÇÃO: verificação explícita de ownership `Account → Customer` autenticado; autenticação e autorização são responsabilidades distintas.
 - ISOLAMENTO DE DADOS: REQUIRED — somente devolver transações pertencentes às contas autorizadas do cliente.
 - VALIDAÇÃO DE ENTRADA: REQUIRED — validar todos os parâmetros de consulta.
 - LOGGING: registrar eventos de consulta (sucesso/erro) sem dados sensíveis; mascarar identificadores sensíveis.
@@ -184,165 +186,167 @@ Skills
 - Capacidade de cumprir política de não exposição de dados sensíveis
 
 Unknown / Missing Context
-- Mecanismo de autenticação (ex.: JWT, session cookie)
-- Estratégia de paginação (cursor vs offset) e tamanho de página padrão
-- Intervalo temporal padrão (ex.: últimos 30 dias) ou se data_range é obrigatório
-- Formato e extensão do recurso de transação (quais campos expor)
+- Não há contexto crítico ausente para o escopo aprovado.
 
 Por que cada item é necessário
 - Autenticação/Autorização: imprescindível para segurança e isolamento de dados.
 - Paginação/Intervalo: necessário para performance e UX; sem isso, a API pode retornar volumes excessivos.
 - Campos do recurso: necessários para que front-end/aplicação consumidor decida se a informação é útil.
 
-## Suposições não confirmadas
+## Escopo
 
-- ASSUMP-001: O usuário deseja consultar transações somente da(s) conta(s) que ele próprio possui — plausível, mas precisa confirmação.
-- ASSUMP-002: A resposta será paginada — recomendação técnica, mas precisa decisão humana sobre tipo de paginação.
+- Consultar transações recentes de uma conta por cliente autenticado e autorizado.
+- Aplicar paginação `offset/limit` e filtro temporal opcional.
 
-## Questões em aberto (resumo)
+## Fora de escopo
 
-- Q-001: Qual mecanismo de autenticação e identidade o projeto usará? (impacta headers, tokens, fluxo de autorização)
-- Q-002: Qual estratégia de paginação adotar (cursor vs offset) e qual o tamanho padrão da página?
-- Q-003: Qual é o intervalo temporal padrão retornado quando nenhum filtro é informado (ex.: últimos 30 dias)? É obrigatório informar filtro temporal?
-- Q-004: Quais campos de Transaction devem ser expostos na API (ex.: id, amount, currency, type, description, merchant, timestamp, balance_after)?
-- Q-005: Como tratar contas sem transações (lista vazia vs. 204)?
-- Q-006: Qual política de ordenação (timestamp desc)? Como tratar timezone?
+- Implementação de endpoint, models, migrations, testes ou qualquer código.
+- Integração com JWT, OAuth2 ou sessão.
+- Inclusão de campos públicos além dos explicitamente aprovados.
 
-## Decisões humanas necessárias
+## API Behavior
 
-Q-001
+- A operação é uma leitura HTTP para transações recentes de uma conta.
+- `offset` padrão é `0`; `limit` padrão é `20`; `limit` máximo é `100`.
+- Sem filtros temporais, `from = now UTC - 30 dias` e `to = now UTC`.
+- A resposta bem-sucedida é `200 OK` com coleção paginada de Transaction.
+- Conta inexistente e conta sem autorização retornam externamente `404 Not Found`.
+- Parâmetros inválidos retornam `400 Bad Request` com estrutura de erro padronizada.
 
-Pergunta: Qual mecanismo de autenticação e identidade será adotado para a API (ex.: JWT bearer tokens, OAuth2, sessão cookie, outro)?
+## Domain Context
 
-Por que precisamos dessa decisão: Determina formato de cabeçalhos, fluxo de validação e integração com o componente de identidade/authorization.
+- Account pertence a Customer e é o contexto de ownership para a consulta.
+- Transaction pertence a Account.
+- O Primary Domain entre Account e Transaction permanece fora desta decisão; não bloqueia a Specification aprovada.
 
-Impacto: Alto — afeta inbound adapter, middleware e exemplos de chamadas.
+## Capabilities
 
-Opções possíveis:
-- JWT Bearer tokens
-- OAuth2 (authorization code / token)
-- Session cookie com backend de sessão
+- API, Persistence, Authentication, Authorization, Validation, Observability e Security são necessárias.
+- Authentication identifica o ator; Authorization verifica ownership e permanece responsabilidade distinta.
 
-Recomendação técnica: Preferir JWT/OAuth2 para APis públicas; documentar escopo/claims necessários.
+## Business Rules
 
-Resposta: [PENDING]
+- Somente transações de conta cujo ownership seja confirmado para o Customer autenticado podem ser retornadas.
+- Datas futuras e intervalos em que `from > to` são inválidos.
+- A API não deve expor campos de Transaction além de `id`, `timestamp`, `amount`, `currency`, `type` e `description` sem nova decisão de produto.
+- A resposta externa não deve revelar se uma conta inexistente existe ou se uma conta existente não está autorizada.
 
-Q-002
+## Failure Scenarios
 
-Pergunta: Qual estratégia de paginação adotar e qual o tamanho padrão de página?
+- Token ausente ou inválido: requisição rejeitada sem acesso aos dados.
+- Conta inexistente ou sem ownership: `404 Not Found`.
+- Data inválida, futura, intervalo inválido, `offset` negativo ou `limit` inválido: `400 Bad Request` com estrutura de erro padronizada.
+- Falha de persistência ou dependência indisponível: erro 5xx observável, sem exposição de dados sensíveis.
 
-Por que precisamos dessa decisão: Afeta contrato da API (parametrização), complexidade de implementação no persistence adapter e UX.
+## Test Scenarios
 
-Impacto: Médio — influência em performance e consistência de resultados.
+- Happy path para cliente autenticado e proprietário da conta.
+- Resultado vazio para conta autorizada.
+- Token ausente ou inválido.
+- Conta inexistente e conta sem ownership com comportamento externo indistinguível.
+- `offset/limit` padrão, máximo e inválido.
+- Filtro temporal padrão, data futura e `from > to`.
+- Falha de persistência ou dependência indisponível.
 
-Opções possíveis:
-- Offset + limit (mais simples)
-- Cursor-based pagination (melhor para grandes volumes e consistência)
+## Human Decisions
 
-Recomendação técnica: Cursor é preferível para listas de transações grandes; se complexidade é uma preocupação, iniciar com offset e evoluir.
+### DEC-SEC-001
 
-Resposta: [PENDING]
+Question: Como identificar o usuário e verificar o acesso à conta?
 
-Q-003
+Decision: Bearer token opaco para o laboratório; autenticação identifica o usuário e autorização verifica explicitamente `Account → Customer` autenticado.
 
-Pergunta: Qual o intervalo temporal padrão quando nenhum filtro de data é fornecido?
+Rationale: Manter o laboratório simples, sem complexidade de JWT/OAuth, e preservar a separação entre autenticação e autorização.
 
-Por que precisamos dessa decisão: Limita volume de dados retornados e define expectativas do usuário.
+Authority: HUMAN_PRODUCT_DECISION
 
-Impacto: Médio
+Status: RESOLVED
 
-Opções possíveis:
-- Últimos 30 dias (padrão comum)
-- Últimos 90 dias
-- Sem padrão — exigir parâmetro (força o cliente a especificar)
+### DEC-API-002
 
-Recomendação técnica: Usar 30 dias como padrão, mas confirmar com produto/regulatório.
+Question: Qual estratégia e valores de paginação usar?
 
-Resposta: [PENDING]
+Decision: `offset/limit`, com `offset=0`, `limit=20` e limite máximo `100`; valores negativos ou limite superior ao máximo são inválidos.
 
-Q-004
+Rationale: Contrato simples, determinístico e suficiente para o primeiro experimento.
 
-Pergunta: Quais campos do recurso Transaction devem ser expostos na API?
+Authority: HUMAN_PRODUCT_DECISION
 
-Por que precisamos dessa decisão: Evita exposição indevida e define o contrato de front-end.
+Status: RESOLVED
 
-Impacto: Alto
+### DEC-PRODUCT-003
 
-Opções possíveis:
-- Campos mínimos: id, timestamp, amount, currency, type, description
-- Campos estendidos: merchant, category, balance_after, status
+Question: Qual é a semântica temporal de transações recentes?
 
-Recomendação técnica: Começar com campos mínimos e adicionar campos estendidos por versionamento.
+Decision: Últimos 30 dias em UTC quando filtros temporais estiverem ausentes; `from = now UTC - 30 dias` e `to = now UTC`. Datas futuras e `from > to` são inválidos.
 
-Resposta: [PENDING]
+Rationale: Comportamento determinístico e testável sem exigir parâmetros temporais em todas as chamadas.
 
-Q-005
+Authority: HUMAN_PRODUCT_DECISION
 
-Pergunta: Como tratar contas sem transações? Retornar lista vazia (200) ou 204 No Content?
+Status: RESOLVED
 
-Por que precisamos dessa decisão: Afeta front-end e critérios de aceite.
+### DEC-PRODUCT-004
 
-Impacto: Baixo
+Question: Quais campos de Transaction são públicos?
 
-Opções possíveis:
-- 200 OK com lista vazia
-- 204 No Content
+Decision: `id`, `timestamp`, `amount`, `currency`, `type` e `description`; não adicionar outros campos sem nova decisão de produto.
 
-Recomendação técnica: 200 OK com lista vazia (menos ambíguo para clientes).
+Rationale: Contrato mínimo suficiente, sem expansão desnecessária da exposição de dados.
 
-Resposta: [PENDING]
+Authority: HUMAN_PRODUCT_DECISION
 
-## Gap Analysis
+Status: RESOLVED
 
-Gap ID: GAP-001
-Descrição: Mecanismo de autenticação não definido.
-Categoria: SECURITY
-Impacto: CRITICAL
-Criticidade: CRITICAL
-Pode prosseguir sem resposta humana?: NÃO
-Opções conhecidas: JWT, OAuth2, Session
-Recomendação técnica: Definir JWT/OAuth2 para APIs; documentar claims necessários.
-Decisão humana necessária: SIM
+### DEC-API-005
 
-Gap ID: GAP-002
-Descrição: Estratégia de paginação e parâmetros (cursor vs offset, tamanho de página).
-Categoria: API
-Impacto: HIGH
-Criticidade: HIGH
-Pode prosseguir sem resposta humana?: NÃO
-Opções conhecidas: Offset/limit, Cursor-based
-Recomendação técnica: Preferir cursor; aceitar offset para MVP se houver restrição de tempo.
-Decisão humana necessária: SIM
+Question: Como responder para conta válida e autorizada sem transações?
 
-Gap ID: GAP-003
-Descrição: Intervalo temporal padrão não definido.
-Categoria: BUSINESS
-Impacto: MEDIUM
-Criticidade: MEDIUM
-Pode prosseguir sem resposta humana?: NÃO
-Opções conhecidas: 30 dias, 90 dias, obrigatório
-Recomendação técnica: 30 dias como padrão; confirmar.
-Decisão humana necessária: SIM
+Decision: `200 OK` com coleção vazia; não usar `204`.
 
-Gap ID: GAP-004
-Descrição: Especificação dos campos de Transaction expostos.
-Categoria: DATA
-Impacto: HIGH
-Criticidade: HIGH
-Pode prosseguir sem resposta humana?: NÃO
-Opções conhecidas: conjunto mínimo vs estendido
-Recomendação técnica: definir conjunto mínimo e versionar para campos adicionais.
-Decisão humana necessária: SIM
+Rationale: Manter a estrutura de resposta consistente independentemente da quantidade de resultados.
 
-Gap ID: GAP-005
-Descrição: Política de resposta para listas vazias (200 vs 204).
-Categoria: API
-Impacto: LOW
-Criticidade: LOW
-Pode prosseguir sem resposta humana?: SIM (mas alinhamento recomendável)
-Opções conhecidas: 200 OK (lista vazia) recomendado.
-Recomendação técnica: 200 OK com lista vazia.
-Decisão humana necessária: NÃO (opcional)
+Authority: HUMAN_PRODUCT_DECISION
+
+Status: RESOLVED
+
+### DEC-SEC-006
+
+Question: Como tratar externamente conta inexistente e conta não autorizada?
+
+Decision: Ambas retornam `404 Not Found`, sem revelar se a conta existe.
+
+Rationale: Evitar exposição desnecessária da existência de recursos e manter comportamento consistente.
+
+Authority: HUMAN_PRODUCT_DECISION
+
+Status: RESOLVED
+
+### DEC-API-007
+
+Question: Qual contrato usar para parâmetros inválidos?
+
+Decision: `400 Bad Request` com estrutura de erro padronizada para datas inválidas ou futuras, `from > to`, `offset` negativo, `limit` inválido ou superior a `100`; não usar `422` como contrato público.
+
+Rationale: Manter contrato explícito e uniforme, independentemente dos defaults do framework.
+
+Authority: HUMAN_PRODUCT_DECISION
+
+Status: RESOLVED
+
+## Open Questions
+
+Não há questões críticas abertas para o escopo desta Specification. A classificação de Primary Domain entre Account e Transaction permanece uma questão não crítica de governança de domínio e não altera o comportamento aprovado.
+
+## Traceability
+
+- DEC-SEC-001 → RF-002, RF-003, CA-005.
+- DEC-API-002 → RF-004, CA-002.
+- DEC-PRODUCT-003 → RF-005, RNF-003, CA-003.
+- DEC-PRODUCT-004 → RF-006, CA-001.
+- DEC-API-005 → RF-007, CA-004.
+- DEC-SEC-006 → CA-006.
+- DEC-API-007 → RNF-004, RNF-005, CA-007.
 
 ## Arquitetura (fluxo conceitual)
 
@@ -363,18 +367,6 @@ Database (tabela de transações)
 Boundaries a respeitar:
 - Use Case não deve acessar diretamente o DB; usar Output Port.
 - Autorização deve ocorrer antes de acessar dados sensíveis.
-
-## Histórico de decisões
-
-(nenhuma decisão tomada localmente nesta SPEC — todas pendentes)
-
-Decision ID: DEC-001
-Date:
-Question: Definição de autenticação para transações
-Decision:
-Decision Maker:
-Impact:
-Related Gap: GAP-001
 
 ## Contexto utilizado nesta análise
 
@@ -432,11 +424,6 @@ Tempo de execução: NOT_AVAILABLE
 
 (sem criação de arquivos automáticos) — candidatos iniciais DRAFT podem ser adicionados após decisões humanas.
 
-## Fora de escopo
-
-- Implementação de endpoint, models, migrations, testes ou qualquer código.
-- Alteração de ADRs ou da constituição arquitetural atual.
-
 ## Validação final (checklist)
 
 Solicitação analisada: YES
@@ -464,6 +451,5 @@ Resultado experimental inventado: NO
 
 ## Próximos passos recomendados (apenas orientação)
 
-1. Decidir mecanimos essenciais (Q-001 a Q-004) para remover bloqueios técnicos.
-2. Com as decisões, completar a SPEC com contratos de API (parâmetros, exemplos, schemas) e critérios de aceite.
-3. Planejar tasks para implementação respeitando a Arquitetura Hexagonal.
+1. Planejar a implementação respeitando a Arquitetura Hexagonal e os requisitos aprovados.
+2. Implementar e testar os comportamentos definidos nesta Specification em etapa posterior.
